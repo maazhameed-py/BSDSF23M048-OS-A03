@@ -2,7 +2,12 @@
 
 int execute(char* arglist[]) {
     int status;
-    int cpid = fork();
+	pid_t cpid;
+	
+	if (handle_builtin(arglist))
+       return 0;
+   
+    cpid = fork();
 
     switch (cpid) {
         case -1:
@@ -18,3 +23,6 @@ int execute(char* arglist[]) {
             return 0;
     }
 }
+
+
+  

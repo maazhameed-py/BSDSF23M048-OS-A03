@@ -12,11 +12,18 @@
 #define MAX_LEN 512
 #define MAXARGS 10
 #define ARGLEN 30
-#define PROMPT "FCIT> "
+#define PROMPT "OS-A03> "
 
 // Function prototypes
 char* read_cmd(char* prompt, FILE* fp);
 char** tokenize(char* cmdline);
 int execute(char** arglist);
+int handle_builtin(char **args);
 
 #endif // SHELL_H
+
+
+
+
+
+
