@@ -4,38 +4,39 @@ int main() {
     char* cmdline;
     char** arglist;
 
-    while ((cmdline = read_cmd(PROMPT, stdin)) != NULL) {
-        // Handle !n before tokenization/history addition
+    // Set custom completion function
+    rl_attempted_completion_function = myshell_completion;
+
+    while ((cmdline = readline(PROMPT)) != NULL) {
+        if (cmdline[0] == '\0') { free(cmdline); continue; }
+
+        // Add to readline history
+        add_history(cmdline);
+
+        // Handle !n expansion using readline's history list
         if (cmdline[0] == '!') {
             char *p = cmdline + 1;
-            // allow optional spaces after '!'
             while (*p == ' ' || *p == '\t') p++;
             char *endptr = NULL;
             errno = 0;
             long n = strtol(p, &endptr, 10);
-            if (p == endptr || errno != 0 || n <= 0) {
-                fprintf(stderr, "myshell: invalid history reference: %s\n", cmdline);
-                free(cmdline);
-                continue;
-            }
-            const char *h = history_get((int)n);
-            if (!h) {
+            if (p == endptr || errno != 0 || n <= 0 || n > history_length) {
                 fprintf(stderr, "myshell: !%ld: event not found\n", n);
                 free(cmdline);
                 continue;
             }
-            // replace cmdline with historical command
-            free(cmdline);
-            cmdline = strdup(h);
-            if (!cmdline) {
-                perror("strdup");
+            HIST_ENTRY *he = history_get((int)n);
+            if (!he) {
+                fprintf(stderr, "myshell: !%ld: event not found\n", n);
+                free(cmdline);
                 continue;
             }
-            printf("%s\n", cmdline); // echo the expanded command
+            char *expanded = strdup(he->line);
+            if (!expanded) { perror("strdup"); free(cmdline); continue; }
+            printf("%s\n", expanded);
+            free(cmdline);
+            cmdline = expanded;
         }
-
-        // Add the (possibly expanded) command to history
-        history_add(cmdline);
 
         if ((arglist = tokenize(cmdline)) != NULL) {
             execute(arglist);

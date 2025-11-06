@@ -9,27 +9,25 @@
 #include <sys/wait.h>
 #include <errno.h>
 
+// Readline
+#include <readline/readline.h>
+#include <readline/history.h>
+
 #define MAX_LEN 512
 #define MAXARGS 10
 #define ARGLEN 30
 #define PROMPT "OS-A03> "
 
-// History configuration
-#ifndef HISTORY_SIZE
-#define HISTORY_SIZE 20
-#endif
-
 // Function prototypes
-char* read_cmd(char* prompt, FILE* fp);
 char** tokenize(char* cmdline);
 int execute(char** arglist);
 int handle_builtin(char **args);
 
-// History APIs
-void history_add(const char* cmd);
-const char* history_get(int n);   // 1-based index; returns NULL if out of range
-int history_count(void);
+// History display helper (implemented using GNU Readline history)
 void history_print(void);
+
+// Readline completion hook
+char** myshell_completion(const char* text, int start, int end);
 
 #endif // SHELL_H
 

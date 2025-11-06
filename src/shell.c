@@ -1,73 +1,49 @@
 #include "shell.h"
+// No heavy scanning for PATH to keep completion responsive
 
-/* ------------ History Data Structure ------------ */
-static char* history[HISTORY_SIZE];
-static int history_head = 0;      // points to next slot to write
-static int history_len = 0;       // number of stored commands (<= HISTORY_SIZE)
-
-void history_add(const char* cmd)
-{
-    if (cmd == NULL || cmd[0] == '\0') return;
-    // Duplicate command string
-    char* copy = strdup(cmd);
-    if (!copy) return; // Allocation failure: silently ignore
-
-    // If overwriting existing entry, free it first
-    if (history_len == HISTORY_SIZE && history[history_head] != NULL) {
-        free(history[history_head]);
-    }
-
-    history[history_head] = copy;
-    history_head = (history_head + 1) % HISTORY_SIZE;
-    if (history_len < HISTORY_SIZE) history_len++;
-}
-
-const char* history_get(int n)
-{
-    if (n < 1 || n > history_len) return NULL;
-    // Oldest entry index
-    int start = (history_head - history_len + HISTORY_SIZE) % HISTORY_SIZE;
-    int idx = (start + (n - 1)) % HISTORY_SIZE;
-    return history[idx];
-}
-
-int history_count(void) { return history_len; }
-
+/* ------------ History printing via Readline ------------ */
 void history_print(void)
 {
-    if (history_len == 0) {
+    if (history_length == 0) {
         printf("(history empty)\n");
         return;
     }
-    int start = (history_head - history_len + HISTORY_SIZE) % HISTORY_SIZE;
-    for (int i = 0; i < history_len; i++) {
-        int idx = (start + i) % HISTORY_SIZE;
-        printf("%d  %s\n", i + 1, history[idx]);
+    HIST_ENTRY **list = history_list();
+    if (!list) {
+        printf("(history unavailable)\n");
+        return;
+    }
+    for (int i = 0; list[i] != NULL; i++) {
+        printf("%d  %s\n", i + 1, list[i]->line);
     }
 }
 
-/* ------------ Read a command from user ------------ */
-char* read_cmd(char* prompt, FILE* fp)
+/* ------------ Readline completion (built-ins + default filenames) ------------ */
+static const char* builtin_cmds[] = { "cd", "pwd", "help", "exit", "jobs", "history", NULL };
+
+static char* builtin_generator(const char* text, int state)
 {
-    printf("%s", prompt);
-    char* cmdline = (char*) malloc(sizeof(char) * MAX_LEN);
-    int c, pos = 0;
-
-    while ((c = getc(fp)) != EOF)
-    {
-        if (c == '\n')
-            break;
-        cmdline[pos++] = c;
+    static int idx;
+    size_t len = strlen(text);
+    if (state == 0) idx = 0;
+    while (builtin_cmds[idx]) {
+        const char* cand = builtin_cmds[idx++];
+        if (strncmp(cand, text, len) == 0)
+            return strdup(cand);
     }
+    return NULL;
+}
 
-    if (c == EOF && pos == 0)
-    {
-        free(cmdline);
-        return NULL;  // Handle Ctrl+D (end of input)
+char** myshell_completion(const char* text, int start, int end)
+{
+    (void)end;
+    // At start of line, complete built-ins. If user typed a path component, let default filename completion handle it.
+    if (start == 0) {
+        if (strchr(text, '/')) return NULL; // fallback to default filename completion
+        return rl_completion_matches(text, builtin_generator);
     }
-
-    cmdline[pos] = '\0';
-    return cmdline;
+    // Non-first word: fall back to default filename completion (NULL tells readline to do default)
+    return NULL;
 }
 
 /* ------------ Tokenize command string ------------ */
@@ -80,7 +56,7 @@ char** tokenize(char* cmdline)
     for (int i = 0; i < MAXARGS + 1; i++)
     {
         arglist[i] = (char*) malloc(sizeof(char) * ARGLEN);
-        bzero(arglist[i], ARGLEN);
+        memset(arglist[i], 0, ARGLEN);
     }
 
     char* cp = cmdline;
@@ -100,8 +76,10 @@ char** tokenize(char* cmdline)
         while (*++cp != '\0' && !(*cp == ' ' || *cp == '\t'))
             len++;
 
-        strncpy(arglist[argnum], start, len);
-        arglist[argnum][len] = '\0';
+        // Clamp token length to ARGLEN-1 to avoid buffer overflow
+        int copy_len = len < (ARGLEN - 1) ? len : (ARGLEN - 1);
+        strncpy(arglist[argnum], start, copy_len);
+        arglist[argnum][copy_len] = '\0';
         argnum++;
     }
 
