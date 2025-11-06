@@ -1,5 +1,51 @@
 #include "shell.h"
 
+/* ------------ History Data Structure ------------ */
+static char* history[HISTORY_SIZE];
+static int history_head = 0;      // points to next slot to write
+static int history_len = 0;       // number of stored commands (<= HISTORY_SIZE)
+
+void history_add(const char* cmd)
+{
+    if (cmd == NULL || cmd[0] == '\0') return;
+    // Duplicate command string
+    char* copy = strdup(cmd);
+    if (!copy) return; // Allocation failure: silently ignore
+
+    // If overwriting existing entry, free it first
+    if (history_len == HISTORY_SIZE && history[history_head] != NULL) {
+        free(history[history_head]);
+    }
+
+    history[history_head] = copy;
+    history_head = (history_head + 1) % HISTORY_SIZE;
+    if (history_len < HISTORY_SIZE) history_len++;
+}
+
+const char* history_get(int n)
+{
+    if (n < 1 || n > history_len) return NULL;
+    // Oldest entry index
+    int start = (history_head - history_len + HISTORY_SIZE) % HISTORY_SIZE;
+    int idx = (start + (n - 1)) % HISTORY_SIZE;
+    return history[idx];
+}
+
+int history_count(void) { return history_len; }
+
+void history_print(void)
+{
+    if (history_len == 0) {
+        printf("(history empty)\n");
+        return;
+    }
+    int start = (history_head - history_len + HISTORY_SIZE) % HISTORY_SIZE;
+    for (int i = 0; i < history_len; i++) {
+        int idx = (start + i) % HISTORY_SIZE;
+        printf("%d  %s\n", i + 1, history[idx]);
+    }
+}
+
 /* ------------ Read a command from user ------------ */
 char* read_cmd(char* prompt, FILE* fp)
 {
@@ -114,6 +160,8 @@ int handle_builtin(char **args)
         printf("  help       - show this help message\n");
         printf("  exit       - exit the shell\n");
         printf("  jobs       - (not yet implemented)\n");
+        printf("  history    - show command history\n");
+        printf("  !n         - re-execute nth command from history\n");
         return 1;
     }
 
@@ -124,41 +172,12 @@ int handle_builtin(char **args)
         return 1;
     }
 
-    return 0;  // not a builtin
-}
-
-/* ------------ Main shell loop (example) ------------ */
-void run_shell(void)
-{
-    char* cmdline;
-    char** arglist;
-
-    while (1)
+    /* history */
+    else if (strcmp(args[0], "history") == 0)
     {
-        char cwd[1024];
-        getcwd(cwd, sizeof(cwd));
-        printf("\033[1;32mmyshell\033[0m:\033[1;34m%s\033[0m$ ", cwd);
-        fflush(stdout);
-
-        cmdline = read_cmd("", stdin);
-        if (cmdline == NULL)
-            break;  // Ctrl+D exits shell
-
-        arglist = tokenize(cmdline);
-        if (arglist == NULL)
-        {
-            free(cmdline);
-            continue;
-        }
-
-        /* Built-ins and external commands handled in execute() */
-        execute(arglist);
-
-        free(cmdline);
-        for (int i = 0; i < MAXARGS + 1; i++)
-            free(arglist[i]);
-        free(arglist);
+        history_print();
+        return 1;
     }
 
-    printf("\nExiting myshell...\n");
+    return 0;  // not a builtin
 }
