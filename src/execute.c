@@ -1,7 +1,7 @@
 #include "shell.h"
 #include <fcntl.h>
 
-int execute(char* arglist[]) {
+int execute(char* arglist[], int background, const char* raw_cmd) {
     if (arglist == NULL || arglist[0] == NULL)
         return 0;
 
@@ -89,8 +89,12 @@ int execute(char* arglist[]) {
             perror("Command not found");
             _exit(1);
         }
-        int status;
-        waitpid(cpid, &status, 0);
+        if (background) {
+            add_job(cpid, raw_cmd);
+        } else {
+            int status;
+            waitpid(cpid, &status, 0);
+        }
         return 0;
     }
 
@@ -155,10 +159,15 @@ int execute(char* arglist[]) {
     // parent: close all pipe fds
     for (int p = 0; p < num_pipes; p++) { close(pipes_arr[p][0]); close(pipes_arr[p][1]); }
 
-    // wait for all children
-    for (int si = 0; si < nst; si++) {
-        int status;
-        waitpid(pids[si], &status, 0);
+    if (background) {
+        // Track only the last stage's pid for simplicity (could track all)
+        add_job(pids[nst - 1], raw_cmd);
+    } else {
+        // wait for all children
+        for (int si = 0; si < nst; si++) {
+            int status;
+            waitpid(pids[si], &status, 0);
+        }
     }
     return 0;
 }

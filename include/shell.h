@@ -18,10 +18,23 @@
 #define ARGLEN 30
 #define PROMPT "OS-A03> "
 
+// Background jobs
+#define MAXJOBS 64
+typedef struct {
+	pid_t pid;
+	char  cmd[MAX_LEN];
+} job_t;
+
 // Function prototypes
 char** tokenize(char* cmdline);
-int execute(char** arglist);
+int execute(char** arglist, int background, const char* raw_cmd);
 int handle_builtin(char **args);
+
+// Jobs management
+void add_job(pid_t pid, const char* cmd);
+void remove_job(pid_t pid);
+void print_jobs(void);
+void reap_background(void);
 
 // History display helper (implemented using GNU Readline history)
 void history_print(void);

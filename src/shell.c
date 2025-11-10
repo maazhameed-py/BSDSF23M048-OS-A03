@@ -1,6 +1,62 @@
 #include "shell.h"
 // No heavy scanning for PATH to keep completion responsive
 
+/* ------------ Background jobs list ------------ */
+static job_t jobs[MAXJOBS];
+static int   jobs_count = 0;
+
+void add_job(pid_t pid, const char* cmd)
+{
+    if (pid <= 0) return;
+    if (jobs_count >= MAXJOBS) {
+        fprintf(stderr, "myshell: job table full, cannot track PID %d\n", (int)pid);
+        return;
+    }
+    jobs[jobs_count].pid = pid;
+    strncpy(jobs[jobs_count].cmd, cmd ? cmd : "(unknown)", sizeof(jobs[jobs_count].cmd) - 1);
+    jobs[jobs_count].cmd[sizeof(jobs[jobs_count].cmd) - 1] = '\0';
+    jobs_count++;
+}
+
+void remove_job(pid_t pid)
+{
+    for (int i = 0; i < jobs_count; i++) {
+        if (jobs[i].pid == pid) {
+            // compact
+            for (int j = i + 1; j < jobs_count; j++) jobs[j-1] = jobs[j];
+            jobs_count--;
+            return;
+        }
+    }
+}
+
+void print_jobs(void)
+{
+    if (jobs_count == 0) {
+        printf("(no background jobs)\n");
+        return;
+    }
+    for (int i = 0; i < jobs_count; i++) {
+        printf("[%d] %d  %s\n", i + 1, (int)jobs[i].pid, jobs[i].cmd);
+    }
+}
+
+void reap_background(void)
+{
+    int status;
+    pid_t pid;
+    // Reap all finished children without blocking
+    while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        // Optional: uncomment for verbose completion logging:
+        // if (WIFEXITED(status)) {
+        //     fprintf(stderr, "[bg] pid %d exited with %d\n", (int)pid, WEXITSTATUS(status));
+        // } else if (WIFSIGNALED(status)) {
+        //     fprintf(stderr, "[bg] pid %d killed by signal %d\n", (int)pid, WTERMSIG(status));
+        // }
+        remove_job(pid);
+    }
+}
+
 /* ------------ History printing via Readline ------------ */
 void history_print(void)
 {
@@ -152,7 +208,7 @@ int handle_builtin(char **args)
     /* jobs (placeholder) */
     else if (strcmp(args[0], "jobs") == 0)
     {
-        printf("Job control not yet implemented.\n");
+        print_jobs();
         return 1;
     }
 
