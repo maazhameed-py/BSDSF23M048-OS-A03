@@ -59,28 +59,34 @@ char** tokenize(char* cmdline)
         memset(arglist[i], 0, ARGLEN);
     }
 
-    char* cp = cmdline;
-    char* start;
-    int len;
     int argnum = 0;
+    const char *cp = cmdline;
 
     while (*cp != '\0' && argnum < MAXARGS)
     {
-        while (*cp == ' ' || *cp == '\t')
-            cp++;  // Skip whitespace
-        if (*cp == '\0')
-            break;
+        // Skip whitespace
+        while (*cp == ' ' || *cp == '\t') cp++;
+        if (*cp == '\0' || *cp == '\n') break;
 
-        start = cp;
-        len = 1;
-        while (*++cp != '\0' && !(*cp == ' ' || *cp == '\t'))
-            len++;
+        // If special operator, emit as its own token
+        if (*cp == '<' || *cp == '>' || *cp == '|') {
+            arglist[argnum][0] = *cp;
+            arglist[argnum][1] = '\0';
+            argnum++;
+            cp++;
+            continue;
+        }
 
-        // Clamp token length to ARGLEN-1 to avoid buffer overflow
-        int copy_len = len < (ARGLEN - 1) ? len : (ARGLEN - 1);
-        strncpy(arglist[argnum], start, copy_len);
-        arglist[argnum][copy_len] = '\0';
-        argnum++;
+        // Otherwise, read a word until whitespace or special char
+        int len = 0;
+        while (*cp != '\0' && *cp != '\n' && *cp != ' ' && *cp != '\t' && *cp != '<' && *cp != '>' && *cp != '|') {
+            if (len < ARGLEN - 1) {
+                arglist[argnum][len++] = *cp;
+            }
+            cp++;
+        }
+        arglist[argnum][len] = '\0';
+        if (len > 0) argnum++;
     }
 
     if (argnum == 0)
