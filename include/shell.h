@@ -13,10 +13,10 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 
-#define MAX_LEN 512
+#define MAX_LEN 512 
 #define MAXARGS 10
-#define ARGLEN 30
-#define PROMPT "OS-A03> "
+#define ARGLEN 256  // Increased to accommodate longer variable values and quoted strings
+#define PROMPT "Maaz-OS-A03> "
 
 // Background jobs
 #define MAXJOBS 64
@@ -41,6 +41,20 @@ void history_print(void);
 
 // Readline completion hook
 char** myshell_completion(const char* text, int start, int end);
+
+// Variables feature (v8)
+typedef struct var_s {
+	char *name;
+	char *value;
+	struct var_s *next;
+} var_t;
+
+// Variable management
+void set_var(const char *name, const char *value);
+const char* get_var(const char *name);
+void print_vars(void);
+void expand_variables(char **arglist);
+void process_assignments(char **arglist); // removes assignment tokens and stores them
 
 #endif // SHELL_H
 

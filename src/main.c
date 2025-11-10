@@ -63,6 +63,9 @@ int main() {
                 if (!cmd_copy) { perror("strdup"); }
                 char **arglist = tokenize(segment);
                 if (arglist) {
+                    // Handle variable assignments (built-in, no fork) and expand $VARS
+                    process_assignments(arglist);
+                    expand_variables(arglist);
                     execute(arglist, background, cmd_copy ? cmd_copy : segment);
                     for (int i = 0; arglist[i] != NULL; i++) free(arglist[i]);
                     free(arglist);

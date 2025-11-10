@@ -5,6 +5,124 @@
 static job_t jobs[MAXJOBS];
 static int   jobs_count = 0;
 
+/* ------------ Variables (v8) ------------ */
+static var_t *vars_head = NULL;
+
+static int is_valid_var_start(char c) {
+    return (c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'));
+}
+
+static int is_valid_var_char(char c) {
+    return is_valid_var_start(c) || (c >= '0' && c <= '9');
+}
+
+void set_var(const char *name, const char *value)
+{
+    if (!name) return;
+    // find existing
+    for (var_t *v = vars_head; v; v = v->next) {
+        if (strcmp(v->name, name) == 0) {
+            free(v->value);
+            v->value = strdup(value ? value : "");
+            return;
+        }
+    }
+    // new
+    var_t *nv = (var_t*)calloc(1, sizeof(var_t));
+    if (!nv) { perror("calloc"); return; }
+    nv->name = strdup(name);
+    nv->value = strdup(value ? value : "");
+    nv->next = vars_head;
+    vars_head = nv;
+}
+
+const char* get_var(const char *name)
+{
+    if (!name) return "";
+    for (var_t *v = vars_head; v; v = v->next) {
+        if (strcmp(v->name, name) == 0) return v->value ? v->value : "";
+    }
+    return ""; // undefined expands to empty
+}
+
+void print_vars(void)
+{
+    for (var_t *v = vars_head; v; v = v->next) {
+        printf("%s=%s\n", v->name, v->value ? v->value : "");
+    }
+}
+
+static int is_assignment_token(const char *tok)
+{
+    if (!tok) return 0;
+    // NAME=VALUE form; NAME must be [A-Za-z_][A-Za-z0-9_]*
+    const char *eq = strchr(tok, '=');
+    if (!eq) return 0;
+    if (eq == tok) return 0; // starts with '=' not allowed
+    // validate name
+    const char *p = tok;
+    if (!is_valid_var_start(*p)) return 0;
+    p++;
+    while (p < eq) {
+        if (!is_valid_var_char(*p)) return 0;
+        p++;
+    }
+    return 1;
+}
+
+void process_assignments(char **arglist)
+{
+    if (!arglist) return;
+    for (int i = 0; arglist[i] != NULL; ) {
+        char *tok = arglist[i];
+        if (is_assignment_token(tok)) {
+            // split into name and value
+            char *eq = strchr(tok, '=');
+            *eq = '\0';
+            const char *name = tok;
+            const char *value = eq + 1;
+            set_var(name, value);
+            // remove token i
+            free(tok);
+            int j = i;
+            while (arglist[j] != NULL) {
+                arglist[j] = arglist[j+1];
+                j++;
+            }
+            // do not increment i; now points to next element
+            continue;
+        }
+        i++;
+    }
+}
+
+void expand_variables(char **arglist)
+{
+    if (!arglist) return;
+    for (int i = 0; arglist[i] != NULL; i++) {
+        char *tok = arglist[i];
+        if (!tok || tok[0] == '\0') continue;
+        // skip operator tokens
+        if ((tok[0] == '|' || tok[0] == '<' || tok[0] == '>') && tok[1] == '\0') continue;
+
+        if (tok[0] == '$') {
+            const char *name = tok + 1;
+            if (*name == '\0') continue; // lone '$'
+            // parse var name letters/digits/_ only
+            int k = 0;
+            while (name[k] && is_valid_var_char(name[k])) k++;
+            // Only expand if token is exactly $NAME (no suffix)
+            if (name[k] == '\0') {
+                const char *val = get_var(name);
+                char *rep = strdup(val ? val : "");
+                if (!rep) { perror("strdup"); continue; }
+                free(arglist[i]);
+                arglist[i] = rep;
+            }
+        }
+    }
+}
+
 void add_job(pid_t pid, const char* cmd)
 {
     if (pid <= 0) return;
@@ -75,7 +193,7 @@ void history_print(void)
 }
 
 /* ------------ Readline completion (built-ins + default filenames) ------------ */
-static const char* builtin_cmds[] = { "cd", "pwd", "help", "exit", "jobs", "history", NULL };
+static const char* builtin_cmds[] = { "cd", "pwd", "help", "exit", "jobs", "history", "set", NULL };
 
 static char* builtin_generator(const char* text, int state)
 {
@@ -109,11 +227,8 @@ char** tokenize(char* cmdline)
         return NULL;
 
     char** arglist = (char**) malloc(sizeof(char*) * (MAXARGS + 1));
-    for (int i = 0; i < MAXARGS + 1; i++)
-    {
-        arglist[i] = (char*) malloc(sizeof(char) * ARGLEN);
-        memset(arglist[i], 0, ARGLEN);
-    }
+    if (!arglist) { perror("malloc"); return NULL; }
+    for (int i = 0; i < MAXARGS + 1; i++) arglist[i] = NULL;
 
     int argnum = 0;
     const char *cp = cmdline;
@@ -126,29 +241,50 @@ char** tokenize(char* cmdline)
 
         // If special operator, emit as its own token
         if (*cp == '<' || *cp == '>' || *cp == '|') {
-            arglist[argnum][0] = *cp;
-            arglist[argnum][1] = '\0';
-            argnum++;
+            char *tok = (char*)calloc(2, 1);
+            if (!tok) { perror("calloc"); break; }
+            tok[0] = *cp;
+            tok[1] = '\0';
+            arglist[argnum++] = tok;
             cp++;
             continue;
         }
 
-        // Otherwise, read a word until whitespace or special char
+        // Otherwise, read a word possibly containing quoted substrings
+        char buf[ARGLEN];
         int len = 0;
         while (*cp != '\0' && *cp != '\n' && *cp != ' ' && *cp != '\t' && *cp != '<' && *cp != '>' && *cp != '|') {
-            if (len < ARGLEN - 1) {
-                arglist[argnum][len++] = *cp;
+            if (*cp == '"') {
+                cp++; // skip opening quote
+                while (*cp != '\0' && *cp != '"') {
+                    if (len < ARGLEN - 1) buf[len++] = *cp;
+                    cp++;
+                }
+                if (*cp == '"') cp++; // skip closing quote
+            } else if (*cp == '\'') {
+                cp++; // skip opening single quote
+                while (*cp != '\0' && *cp != '\'') {
+                    if (len < ARGLEN - 1) buf[len++] = *cp;
+                    cp++;
+                }
+                if (*cp == '\'') cp++; // skip closing single quote
+            } else {
+                if (len < ARGLEN - 1) buf[len++] = *cp;
+                cp++;
             }
-            cp++;
         }
-        arglist[argnum][len] = '\0';
-        if (len > 0) argnum++;
+        buf[len] = '\0';
+        if (len > 0) {
+            arglist[argnum] = strdup(buf);
+            if (!arglist[argnum]) { perror("strdup"); break; }
+            argnum++;
+        }
     }
 
     if (argnum == 0)
     {
         for (int i = 0; i < MAXARGS + 1; i++)
-            free(arglist[i]);
+            if (arglist[i]) free(arglist[i]);
         free(arglist);
         return NULL;
     }
@@ -202,6 +338,7 @@ int handle_builtin(char **args)
         printf("  jobs       - (not yet implemented)\n");
         printf("  history    - show command history\n");
         printf("  !n         - re-execute nth command from history\n");
+        printf("  set        - list shell variables\n");
         return 1;
     }
 
@@ -218,6 +355,13 @@ int handle_builtin(char **args)
         history_print();
         return 1;
     }
+
+        /* set (list variables) */
+        else if (strcmp(args[0], "set") == 0)
+        {
+            print_vars();
+            return 1;
+        }
 
     return 0;  // not a builtin
 }
